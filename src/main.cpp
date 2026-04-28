@@ -71,44 +71,45 @@ void updateFiringSequence() {
 }
 
 void logSensors() {
-  Serial.println("[INA219] Voltage: " + String(ina219.getBusVoltage_V(), 2) + " V");
-  Serial.println("[INA219] Current: " + String(ina219.getCurrent_mA() / 1000.0, 3) + " A");
-  Serial.println("[INA219] Power: "   + String(ina219.getPower_mW(), 2) + " mW");
-
+  float voltage = ina219.getBusVoltage_V();
+  float current = ina219.getCurrent_mA() / 1000.0;
+  float power = ina219.getPower_mW();
   float rpm;
   if (millis() - lastPulseTime > 2000) {
     rpm = 0;
   } else {
     rpm = calculateRPM();
   }
-  Serial.println("[HALL] RPM: " + String(rpm, 1));
 
-  Serial.println("---");
+  Serial.print(millis());   
+  Serial.print(",");
+  Serial.print(voltage, 2); 
+  Serial.print(",");
+  Serial.print(current, 3);
+  Serial.print(",");
+  Serial.print(power, 2);   
+  Serial.print(",");
+  Serial.println(rpm, 1);
 }
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("===============================");
+  Serial.println("timestamp_ms,voltage_V,current_A,power_mW,rpm");
 
   pinMode(HALL_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(HALL_PIN), onHallPulse, FALLING);
-  Serial.println("[HALL] Ready");
 
   if (!ina219.begin()) {
-    Serial.println("[INA219] ERROR - Failed to find INA219 chip");
+    Serial.println("ERROR - INA219 not found");
     while (1) { delay(10); }
   }
-  Serial.println("[INA219] Ready");
 
   for (int i = 0; i < SOLENOID_COUNT; i++) {
     pinMode(solenoids[i], OUTPUT);
     digitalWrite(solenoids[i], LOW);
   }
-  Serial.println("[SOLENOIDS] Ready");
-
-  Serial.println("===============================");
 }
 
 void loop() {
