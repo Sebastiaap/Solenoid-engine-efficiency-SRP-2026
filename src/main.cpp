@@ -11,7 +11,7 @@
 #define SOLENOID4_PIN D6
 #define SOLENOID5_PIN D7
 
-uint8_t solenoids[] = {SOLENOID0_PIN, SOLENOID1_PIN, SOLENOID2_PIN, SOLENOID3_PIN, SOLENOID4_PIN, SOLENOID5_PIN};
+uint8_t solenoids[] = {SOLENOID0_PIN, SOLENOID4_PIN, SOLENOID2_PIN, SOLENOID5_PIN, SOLENOID1_PIN, SOLENOID3_PIN};
 const int SOLENOID_COUNT = sizeof(solenoids) / sizeof(solenoids[0]);
 
 #define SOLENOID_ON_MS 100
@@ -27,11 +27,28 @@ unsigned long solenoidOnTime = 0;
 int  currentSolenoid = -1;
 bool firingActive = false;
 
+volatile unsigned long lastPulseTime = 0;
+volatile unsigned long pulseDuration = 0;
+volatile bool newPulse = false;
+
+void IRAM_ATTR onHallPulse() {
+  unsigned long now = millis();
+  pulseDuration = now - lastPulseTime;
+  lastPulseTime = now;
+  newPulse = true;
+}
+
+float calculateRPM() {
+  if (pulseDuration == 0) return 0;
+  return 60000.0 / pulseDuration;
+}
+
 void startFiringSequence() {
   firingActive = true;
   currentSolenoid = 0;
   digitalWrite(solenoids[0], HIGH);
   solenoidOnTime = millis();
+  // Serial.println("[SOLENOID] Fired solenoid 0");
 }
 
 void updateFiringSequence() {
@@ -44,9 +61,11 @@ void updateFiringSequence() {
     if (currentSolenoid < SOLENOID_COUNT) {
       digitalWrite(solenoids[currentSolenoid], HIGH);
       solenoidOnTime = millis();
+      // Serial.println("[SOLENOID] Fired solenoid " + String(currentSolenoid));
     } else {
       firingActive = false;
       currentSolenoid = -1;
+      // Serial.println("[SOLENOID] Sequence complete");
     }
   }
 }
@@ -56,11 +75,13 @@ void logSensors() {
   Serial.println("[INA219] Current: " + String(ina219.getCurrent_mA() / 1000.0, 3) + " A");
   Serial.println("[INA219] Power: "   + String(ina219.getPower_mW(), 2) + " mW");
 
-  if (digitalRead(HALL_PIN) == HIGH) {
-    Serial.println("[HALL] Magnetic field detected");
+  float rpm;
+  if (millis() - lastPulseTime > 2000) {
+    rpm = 0;
   } else {
-    Serial.println("[HALL] No magnetic field detected.");
+    rpm = calculateRPM();
   }
+  Serial.println("[HALL] RPM: " + String(rpm, 1));
 
   Serial.println("---");
 }
@@ -72,6 +93,7 @@ void setup() {
   Serial.println("===============================");
 
   pinMode(HALL_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(HALL_PIN), onHallPulse, FALLING);
   Serial.println("[HALL] Ready");
 
   if (!ina219.begin()) {
