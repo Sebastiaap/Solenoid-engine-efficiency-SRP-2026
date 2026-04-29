@@ -49,7 +49,6 @@ void startFiringSequence() {
   currentSolenoid = 0;
   digitalWrite(solenoids[0], HIGH);
   solenoidOnTime = millis();
-  // Serial.println("[SOLENOID] Fired solenoid 0");
 }
 
 void updateFiringSequence() {
