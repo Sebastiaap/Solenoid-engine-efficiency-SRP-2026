@@ -16,6 +16,7 @@ const int SOLENOID_COUNT = sizeof(solenoids) / sizeof(solenoids[0]);
 
 #define SOLENOID_ON_MS 100
 #define SOLENOID_INTERVAL_MS 1000
+#define SOLENOID_STEP_MS 200
 #define LOG_INTERVAL_MS 200
 
 Adafruit_INA219 ina219;
@@ -59,13 +60,13 @@ void updateFiringSequence() {
     currentSolenoid++;
 
     if (currentSolenoid < SOLENOID_COUNT) {
-      digitalWrite(solenoids[currentSolenoid], HIGH);
-      solenoidOnTime = millis();
-      // Serial.println("[SOLENOID] Fired solenoid " + String(currentSolenoid));
+      if (millis() - solenoidOnTime >= SOLENOID_STEP_MS) {
+        digitalWrite(solenoids[currentSolenoid], HIGH);
+        solenoidOnTime = millis();
+      }
     } else {
       firingActive = false;
       currentSolenoid = -1;
-      // Serial.println("[SOLENOID] Sequence complete");
     }
   }
 }
