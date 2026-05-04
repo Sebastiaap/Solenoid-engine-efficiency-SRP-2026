@@ -14,29 +14,29 @@
 uint8_t solenoids[] = {SOLENOID0_PIN, SOLENOID4_PIN, SOLENOID2_PIN, SOLENOID5_PIN, SOLENOID1_PIN, SOLENOID3_PIN};
 const int SOLENOID_COUNT = sizeof(solenoids) / sizeof(solenoids[0]);
 
-#define SOLENOID_ON_MS 100
-#define SOLENOID_INTERVAL_MS 1000
-#define SOLENOID_STEP_MS 200
-#define LOG_INTERVAL_MS 200
+#define SOLENOID_ON_MS         100
+#define SOLENOID_STEP_START_MS 300
+#define SOLENOID_STEP_MIN_MS    50
+#define ACCEL_DURATION_MS      15000
+#define LOG_INTERVAL_MS         200
 
 Adafruit_INA219 ina219;
 
-unsigned long lastSequenceTime = 0;
-unsigned long lastLogTime = 0;
+unsigned long lastLogTime    = 0;
 unsigned long solenoidOnTime = 0;
+unsigned long startTime      = 0;
 
-int  currentSolenoid = -1;
-bool firingActive = false;
+float currentStepMs = SOLENOID_STEP_START_MS;
+
+int currentSolenoid = 0;
 
 volatile unsigned long lastPulseTime = 0;
 volatile unsigned long pulseDuration = 0;
-volatile bool newPulse = false;
 
 void IRAM_ATTR onHallPulse() {
   unsigned long now = millis();
   pulseDuration = now - lastPulseTime;
   lastPulseTime = now;
-  newPulse = true;
 }
 
 float calculateRPM() {
@@ -44,28 +44,20 @@ float calculateRPM() {
   return 60000.0 / pulseDuration;
 }
 
-void startFiringSequence() {
-  firingActive = true;
-  currentSolenoid = 0;
-  digitalWrite(solenoids[0], HIGH);
-  solenoidOnTime = millis();
+void updateTiming() {
+  float progress = (float)(millis() - startTime) / ACCEL_DURATION_MS;
+  if (progress > 1.0) progress = 1.0;
+  currentStepMs = SOLENOID_STEP_START_MS - (SOLENOID_STEP_START_MS - SOLENOID_STEP_MIN_MS) * progress;
 }
 
 void updateFiringSequence() {
-  if (!firingActive) return;
-
   if (millis() - solenoidOnTime >= SOLENOID_ON_MS) {
     digitalWrite(solenoids[currentSolenoid], LOW);
-    currentSolenoid++;
+    currentSolenoid = (currentSolenoid + 1) % SOLENOID_COUNT;
 
-    if (currentSolenoid < SOLENOID_COUNT) {
-      if (millis() - solenoidOnTime >= SOLENOID_STEP_MS) {
-        digitalWrite(solenoids[currentSolenoid], HIGH);
-        solenoidOnTime = millis();
-      }
-    } else {
-      firingActive = false;
-      currentSolenoid = -1;
+    if (millis() - solenoidOnTime >= (unsigned long)currentStepMs) {
+      digitalWrite(solenoids[currentSolenoid], HIGH);
+      solenoidOnTime = millis();
     }
   }
 }
@@ -73,22 +65,13 @@ void updateFiringSequence() {
 void logSensors() {
   float voltage = ina219.getBusVoltage_V();
   float current = ina219.getCurrent_mA() / 1000.0;
-  float power = ina219.getPower_mW();
-  float rpm;
-  if (millis() - lastPulseTime > 2000) {
-    rpm = 0;
-  } else {
-    rpm = calculateRPM();
-  }
+  float power   = ina219.getPower_mW();
+  float rpm     = (millis() - lastPulseTime > 2000) ? 0 : calculateRPM();
 
-  Serial.print(millis());   
-  Serial.print(",");
-  Serial.print(voltage, 2); 
-  Serial.print(",");
-  Serial.print(current, 3);
-  Serial.print(",");
-  Serial.print(power, 2);   
-  Serial.print(",");
+  Serial.print(millis());   Serial.print(",");
+  Serial.print(voltage, 2); Serial.print(",");
+  Serial.print(current, 3); Serial.print(",");
+  Serial.print(power, 2);   Serial.print(",");
   Serial.println(rpm, 1);
 }
 
@@ -110,20 +93,18 @@ void setup() {
     pinMode(solenoids[i], OUTPUT);
     digitalWrite(solenoids[i], LOW);
   }
+
+  startTime      = millis();
+  solenoidOnTime = millis();
+  digitalWrite(solenoids[0], HIGH);
 }
 
 void loop() {
-  unsigned long now = millis();
-
-  if (!firingActive && now - lastSequenceTime >= SOLENOID_INTERVAL_MS) {
-    lastSequenceTime = now;
-    startFiringSequence();
-  }
-
+  updateTiming();
   updateFiringSequence();
 
-  if (now - lastLogTime >= LOG_INTERVAL_MS) {
-    lastLogTime = now;
+  if (millis() - lastLogTime >= LOG_INTERVAL_MS) {
+    lastLogTime = millis();
     logSensors();
   }
 }
