@@ -11,24 +11,28 @@
 #define SOLENOID4_PIN D6
 #define SOLENOID5_PIN D7
 
-uint8_t solenoids[] = {SOLENOID0_PIN, SOLENOID4_PIN, SOLENOID2_PIN, SOLENOID5_PIN, SOLENOID1_PIN, SOLENOID3_PIN};
+uint8_t solenoids[] = {SOLENOID0_PIN, SOLENOID4_PIN, SOLENOID2_PIN,
+                       SOLENOID5_PIN, SOLENOID1_PIN, SOLENOID3_PIN};
 const int SOLENOID_COUNT = sizeof(solenoids) / sizeof(solenoids[0]);
 
-#define SOLENOID_ON_MS         100
-#define SOLENOID_STEP_START_MS 300
-#define SOLENOID_STEP_MIN_MS    50
-#define ACCEL_DURATION_MS      15000
-#define LOG_INTERVAL_MS         200
+// Each solenoid fires for currentOnMs, then the slot lasts SOLENOID_SLOT_MS total.
+// Slot must always be >= ON duration.
+#define SOLENOID_SLOT_MS      800   // Fixed time slice per solenoid
+#define SOLENOID_ON_START_MS  780   // ON duration at t=0 (nearly full slot)
+#define SOLENOID_ON_MIN_MS    100   // ON duration at end of accel
+#define ACCEL_DURATION_MS   60000   // 60 seconds to ramp up
+#define LOG_INTERVAL_MS       200
 
 Adafruit_INA219 ina219;
 
 unsigned long lastLogTime    = 0;
-unsigned long solenoidOnTime = 0;
+unsigned long slotStartTime  = 0;   // When the current solenoid's slot began
 unsigned long startTime      = 0;
 
-float currentStepMs = SOLENOID_STEP_START_MS;
+float currentOnMs = SOLENOID_ON_START_MS;  // Shrinks over time
 
 int currentSolenoid = 0;
+bool solenoidActive = false;
 
 volatile unsigned long lastPulseTime = 0;
 volatile unsigned long pulseDuration = 0;
@@ -47,18 +51,33 @@ float calculateRPM() {
 void updateTiming() {
   float progress = (float)(millis() - startTime) / ACCEL_DURATION_MS;
   if (progress > 1.0) progress = 1.0;
-  currentStepMs = SOLENOID_STEP_START_MS - (SOLENOID_STEP_START_MS - SOLENOID_STEP_MIN_MS) * progress;
+  currentOnMs = SOLENOID_ON_START_MS
+                - (SOLENOID_ON_START_MS - SOLENOID_ON_MIN_MS) * progress;
 }
 
 void updateFiringSequence() {
-  if (millis() - solenoidOnTime >= SOLENOID_ON_MS) {
-    digitalWrite(solenoids[currentSolenoid], LOW);
-    currentSolenoid = (currentSolenoid + 1) % SOLENOID_COUNT;
+  unsigned long now     = millis();
+  unsigned long elapsed = now - slotStartTime;
 
-    if (millis() - solenoidOnTime >= (unsigned long)currentStepMs) {
-      digitalWrite(solenoids[currentSolenoid], HIGH);
-      solenoidOnTime = millis();
+  // 1) Turn OFF once the ON window has passed
+  if (solenoidActive && elapsed >= (unsigned long)currentOnMs) {
+    digitalWrite(solenoids[currentSolenoid], LOW);
+    solenoidActive = false;
+  }
+
+  // 2) Advance to next solenoid once the full slot has passed
+  if (elapsed >= SOLENOID_SLOT_MS) {
+    // Safety: make sure current is off before moving on
+    if (solenoidActive) {
+      digitalWrite(solenoids[currentSolenoid], LOW);
+      solenoidActive = false;
     }
+
+    currentSolenoid = (currentSolenoid + 1) % SOLENOID_COUNT;
+    slotStartTime   = now;
+
+    digitalWrite(solenoids[currentSolenoid], HIGH);
+    solenoidActive = true;
   }
 }
 
@@ -94,9 +113,12 @@ void setup() {
     digitalWrite(solenoids[i], LOW);
   }
 
-  startTime      = millis();
-  solenoidOnTime = millis();
+  startTime     = millis();
+  slotStartTime = millis();
+
+  // Fire the first solenoid immediately
   digitalWrite(solenoids[0], HIGH);
+  solenoidActive = true;
 }
 
 void loop() {
